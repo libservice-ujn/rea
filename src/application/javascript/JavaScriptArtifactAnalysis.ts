@@ -201,17 +201,32 @@ export const analyzeAndAdoptJavaScriptArtifactFiles = async (
     let analysisStarted = false;
     try {
       await setImmediate();
-      if (
-        !file.text.included &&
-        file.text.reason === "outside-analysis-scope"
-      ) {
-        classifyUnavailableSource(file, state, projection);
-        if (signal?.aborted === true) {
+      if (classifyUnavailableSource(file, state, projection)) {
+        if (isSignalAborted(signal)) {
           interruption = new AnalysisCancelledError(
             "analyze_javascript_application",
-            { cause: signal.reason },
+            { cause: signal?.reason },
           );
           break;
+        }
+        if (
+          file.kind === "javascript" &&
+          !file.text.included &&
+          file.text.reason !== "outside-analysis-scope"
+        ) {
+          try {
+            await beforeFile(file, selectedFileIndex++, selectedFileCount);
+          } catch (cause: unknown) {
+            interruption = translateAnalysisInterruption(cause, signal);
+            break;
+          }
+          if (isSignalAborted(signal)) {
+            interruption = new AnalysisCancelledError(
+              "analyze_javascript_application",
+              { cause: signal?.reason },
+            );
+            break;
+          }
         }
         continue;
       }
@@ -221,10 +236,6 @@ export const analyzeAndAdoptJavaScriptArtifactFiles = async (
         });
       await beforeFile(file, selectedFileIndex++, selectedFileCount);
       analysisStarted = true;
-      if (file.kind === "javascript" && !file.text.included) {
-        classifyUnavailableSource(file, state, projection);
-        continue;
-      }
       if (file.kind !== "javascript") {
         const steps = analyzeArtifactFileSteps(file, {
           state,
