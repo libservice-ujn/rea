@@ -776,6 +776,10 @@ it("preserves unavailable JavaScript sources identically between compact and ful
     Buffer.from([0xef, 0xbb, 0xbf, 0xff]),
   );
   await writeFile(join(root, "unparseable.js"), "const = ;\n");
+  await writeFile(
+    join(root, "electron.js"),
+    'const e = require("electron"); e.ipcMain.on("test:copy", (event) => { event.sender.copy(); });\n',
+  );
   const snapshot = await scanCanonicalArtifactInventory(root, {});
   const reader = createJavaScriptArtifactReader(root, "directory");
   try {
@@ -808,6 +812,13 @@ it("preserves unavailable JavaScript sources identically between compact and ful
       semantic.nodes.some(
         ({ kind, identity }) =>
           kind === "module" && identity.module_path === "unparseable.js",
+      ),
+    ).toBe(true);
+    expect(
+      semantic.nodes.some(
+        ({ properties }) =>
+          typeof properties.path_id === "string" &&
+          properties.terminal === "ipc-event.sender.copy",
       ),
     ).toBe(true);
   } finally {

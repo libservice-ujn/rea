@@ -20,6 +20,7 @@ import {
 } from "../../domain/sourceMapEnvelope.js";
 import type { SourceMapLeaf } from "../../domain/sourceMapEnvelope.js";
 import type { JavaScriptStaticAnalysis } from "../../domain/javascript/javascriptStaticAnalysisTypes.js";
+import type { ElectronCallPath } from "../../domain/javascript/electronStaticAnalysisTypes.js";
 import { failedJavaScriptStaticAnalysis } from "../../domain/javascript/javascriptStaticAnalysisHelpers.js";
 import {
   type JavaScriptArtifactFile,
@@ -83,6 +84,7 @@ interface ArtifactAnalysisContext<
   readonly projectSemantics: (
     file: JavaScriptArtifactFile,
     ir: JavaScriptSemanticIr,
+    paths?: readonly ElectronCallPath[],
   ) => Generator<void, SemanticIr>;
 }
 
@@ -107,6 +109,7 @@ export const analyzeAndProjectJavaScriptArtifactFiles = async (
     | ((
         file: JavaScriptArtifactFile,
         ir: JavaScriptSemanticIr,
+        paths?: readonly ElectronCallPath[],
       ) => Iterator<void, void> | void)
     | Pick<
         JavaScriptSemanticGraphProjection,
@@ -134,8 +137,9 @@ export const analyzeAndProjectJavaScriptArtifactFiles = async (
   const projectFileSemantics = function* (
     file: JavaScriptArtifactFile,
     ir: JavaScriptSemanticIr,
+    paths?: readonly ElectronCallPath[],
   ): Generator<void, JavaScriptModuleSemanticIr> {
-    const projection = projectFn(file, ir);
+    const projection = projectFn(file, ir, paths);
     if (projection !== undefined) while (projection.next().done !== true) yield;
     return projectJavaScriptModuleSemantics(ir);
   };
@@ -498,7 +502,11 @@ function* analyzeArtifactFileSteps<
   const projected =
     semantics === null
       ? null
-      : yield* context.projectSemantics(file, semantics);
+      : yield* context.projectSemantics(
+          file,
+          semantics,
+          analysis.electron.call_paths,
+        );
   state.files.push({
     file,
     javascript: analysis,
