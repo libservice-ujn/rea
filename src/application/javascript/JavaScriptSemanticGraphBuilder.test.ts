@@ -19,7 +19,10 @@ import {
   constructSemanticGraphNode,
   createSemanticGraphProjectionState,
 } from "./JavaScriptSemanticGraphConstruction.js";
-import type { JavaScriptArtifactFile } from "../../domain/javascript/javascriptArtifactFiles.js";
+import {
+  type JavaScriptArtifactFile,
+  javaScriptArtifactTextExclusion,
+} from "../../domain/javascript/javascriptArtifactFiles.js";
 import { queryJavaScriptSemanticGraph } from "../../domain/javascript/javascriptSemanticQuery.js";
 import {
   analyzeJavaScriptSemantics,
@@ -1387,7 +1390,7 @@ it("reports node-cap drops as truncation when an unavailable file cannot retain 
   };
   projection.recordUnavailableFile(
     file2,
-    "JavaScript text was unavailable: invalid-utf8.",
+    javaScriptArtifactTextExclusion(file2)!,
     null,
     "incomplete-module",
   );
@@ -1423,7 +1426,7 @@ it("reports unknown-ceiling drops when an unavailable file exceeds unknown capac
   };
   projection.recordUnavailableFile(
     file,
-    "JavaScript text was unavailable: invalid-utf8.",
+    javaScriptArtifactTextExclusion(file)!,
     null,
     "incomplete-module",
   );

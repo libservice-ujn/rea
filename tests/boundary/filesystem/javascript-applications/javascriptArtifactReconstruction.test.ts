@@ -19,6 +19,7 @@ import {
 } from "../../../support/javascriptApplicationScope.js";
 import {
   analyzeJavaScriptArtifactFiles,
+  analyzeAndProjectJavaScriptArtifactFiles,
   analyzeAndAdoptJavaScriptArtifactFiles,
 } from "../../../../src/application/javascript/JavaScriptArtifactAnalysis.js";
 import { buildJavaScriptArtifactGraph } from "../../../../src/application/javascript/JavaScriptArtifactGraphBuilder.js";
@@ -774,6 +775,7 @@ it("preserves unavailable JavaScript sources identically between compact and ful
     join(root, "invalid.js"),
     Buffer.from([0xef, 0xbb, 0xbf, 0xff]),
   );
+  await writeFile(join(root, "unparseable.js"), "const = ;\n");
   const snapshot = await scanCanonicalArtifactInventory(root, {});
   const reader = createJavaScriptArtifactReader(root, "directory");
   try {
@@ -800,6 +802,12 @@ it("preserves unavailable JavaScript sources identically between compact and ful
       semantic.nodes.some(
         ({ kind, identity }) =>
           kind === "module" && identity.module_path === "invalid.js",
+      ),
+    ).toBe(true);
+    expect(
+      semantic.nodes.some(
+        ({ kind, identity }) =>
+          kind === "module" && identity.module_path === "unparseable.js",
       ),
     ).toBe(true);
   } finally {

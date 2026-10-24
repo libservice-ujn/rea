@@ -24,9 +24,6 @@ import { failedJavaScriptStaticAnalysis } from "../../domain/javascript/javascri
 import {
   type JavaScriptArtifactFile,
   type JavaScriptArtifactFileSet,
-  unavailableJavaScriptSourceReason,
-} from "../../domain/javascript/javascriptArtifactFiles.js";
-import {
   javaScriptArtifactTextExclusion,
   javaScriptSemanticSourceExclusion,
 } from "../../domain/javascript/javascriptArtifactFiles.js";
@@ -151,13 +148,13 @@ export const analyzeAndProjectJavaScriptArtifactFiles = async (
       analyzeArtifactFileSteps(file, context),
       signal,
     );
-    if (file.kind === "javascript" && !file.text.included)
-      recordUnavailable?.(
-        file,
-        unavailableJavaScriptSourceReason(file.text.reason),
-        null,
-        "incomplete-module",
-      );
+    const analyzed = state.files[state.files.length - 1];
+    const reason = javaScriptSemanticSourceExclusion(
+      file,
+      analyzed?.javascript?.parse_status ?? null,
+    );
+    if (reason !== null)
+      recordUnavailable?.(file, reason, null, "incomplete-module");
   }
   return finalizeArtifactAnalysis(state);
 };
@@ -204,41 +201,15 @@ export const analyzeAndAdoptJavaScriptArtifactFiles = async (
     let analysisStarted = false;
     try {
       await setImmediate();
-      if (classifyUnavailableSource(file, state, projection)) {
+      if (
+        !file.text.included &&
+        file.text.reason === "outside-analysis-scope"
+      ) {
+        classifyUnavailableSource(file, state, projection);
         if (signal?.aborted === true) {
           interruption = new AnalysisCancelledError(
             "analyze_javascript_application",
             { cause: signal.reason },
-          );
-          break;
-        }
-        continue;
-      }
-      if (file.kind === "javascript" && !file.text.included) {
-        state.files.push({ file, javascript: null, semantic: null });
-        projection.recordUnavailableFile(
-          file,
-          unavailableJavaScriptSourceReason(file.text.reason),
-          null,
-          "incomplete-module",
-        );
-        if (isSignalAborted(signal)) {
-          interruption = new AnalysisCancelledError(
-            "analyze_javascript_application",
-            { cause: signal?.reason },
-          );
-          break;
-        }
-        try {
-          await beforeFile(file, selectedFileIndex++, selectedFileCount);
-        } catch (cause: unknown) {
-          interruption = translateAnalysisInterruption(cause, signal);
-          break;
-        }
-        if (isSignalAborted(signal)) {
-          interruption = new AnalysisCancelledError(
-            "analyze_javascript_application",
-            { cause: signal?.reason },
           );
           break;
         }
@@ -250,6 +221,10 @@ export const analyzeAndAdoptJavaScriptArtifactFiles = async (
         });
       await beforeFile(file, selectedFileIndex++, selectedFileCount);
       analysisStarted = true;
+      if (file.kind === "javascript" && !file.text.included) {
+        classifyUnavailableSource(file, state, projection);
+        continue;
+      }
       if (file.kind !== "javascript") {
         const steps = analyzeArtifactFileSteps(file, {
           state,
