@@ -510,21 +510,31 @@ it.skipIf(process.platform !== "darwin")(
     expect(parsed).toMatchObject({ signed: false });
     const selectedArchitecture =
       target.architecture === "x86" ? "i386" : target.architecture;
+    // An unsigned display has no Format line, so a universal file's slice
+    // names come from lipo, by their exact names rather than CPU families.
+    const sliceNames =
+      target.format === "mach-o-universal"
+        ? (await runFile("/usr/bin/lipo", ["-archs", path])).stdout
+            .trim()
+            .split(/\s+/u)
+        : [];
     expect(
-      parsed.provenance.map(
-        ({ command }) => command[command.indexOf("-a") + 1],
+      parsed.provenance.map(({ command }) =>
+        command.includes("-a")
+          ? command[command.indexOf("-a") + 1]
+          : command.slice(1, -1).join(" "),
       ),
     ).toEqual([
       selectedArchitecture,
       selectedArchitecture,
       selectedArchitecture,
-      ...(target.availableArchitectures.length > 1
-        ? target.availableArchitectures.map((architecture) =>
-            architecture === "x86" ? "i386" : architecture,
-          )
-        : []),
+      ...(sliceNames.length > 1 ? ["-archs", ...sliceNames] : []),
     ]);
-    expect(parsed.provenance.every(({ exit }) => exit.code === 1)).toBe(true);
+    expect(
+      parsed.provenance
+        .filter(({ command }) => command.includes("-a"))
+        .every(({ exit }) => exit.code === 1),
+    ).toBe(true);
   },
 );
 
@@ -676,11 +686,17 @@ it.skipIf(process.platform !== "darwin")(
       signed: true,
       identifier: "rea.original",
     });
-    expect(
-      inspectSignatureSchema
-        .parse(result.value.result)
-        .provenance.map(({ command }) => command.at(-1)),
-    ).toEqual(["$ARTIFACT", "$ARTIFACT", "$ARTIFACT"]);
+    // /usr/bin/true is universal, so the three requested-slice queries are
+    // followed by lipo, one display query per slice and an entitlements query
+    // for each other slice. Every one reads the snapshot.
+    const commands = inspectSignatureSchema
+      .parse(result.value.result)
+      .provenance.map(({ command }) => command);
+    expect(commands.length).toBeGreaterThanOrEqual(3);
+    expect(commands.map((command) => command.at(-1))).toEqual(
+      commands.map(() => "$ARTIFACT"),
+    );
+    expect(commands.some((command) => command.includes("-a"))).toBe(true);
     if (capturedPath === undefined)
       throw new Error("Expected codesign invocation");
     await expect(lstat(dirname(capturedPath))).rejects.toMatchObject({

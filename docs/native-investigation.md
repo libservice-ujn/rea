@@ -967,6 +967,31 @@ debugged; `inspect_signature` reports the signature's `hardened_runtime` value
 and its `entitlements`, including `com.apple.security.get-task-allow` when it
 is present. A denied trace reports the `debugger-attach-denied` reason.
 
+Each slice of a universal Mach-O is signed on its own. The `inspect_signature`
+fields (`identifier`, `cdhashes`, `hardened_runtime`, `entitlements`,
+authorities, `designated_requirement`) describe the requested architecture,
+which every codesign query names with `-a`, and a `Partial signature coverage`
+limitation says so. REA then queries every slice; one signed with another
+identifier, team, authorities, hardened-runtime state or entitlements is named
+in a `Mach-O slices signed differently` limitation with its differing values,
+an unsigned slice in `Unsigned Mach-O slices`, and the other signed slices in
+`Other signed Mach-O slices` with their CDHashes. When an ad hoc
+`designated_requirement` names CDHashes that `cdhashes` does not list, a
+limitation says which slice each belongs to, or that none matched. When the
+requested slice of a universal file is unsigned, `signed` is false for that
+slice and a limitation names the signed slices with their identifier, team,
+authorities, CDHash and hardened-runtime state. With `-a`, codesign reports the
+requested slice as a thin Mach-O, and an unsigned display has no Format line,
+so a universal file's slice names come from `lipo -archs` (or the target's CPU
+families when lipo is unavailable), which names variants such as `arm64e.x1`
+as `codesign -a` accepts them. Differing entitlements are listed with their
+values; identifiers, authorities and entitlement keys are JSON-quoted in these
+sentences, and two plists that project to the same JSON but differ in plist
+value types (a `<data>` value against a dictionary shaped like its wrapper) are
+reported as different. Slice entitlements that cannot be read or decoded stay
+out of the comparison and are named in a limitation. Per-slice queries appear
+in `provenance` as `codesign -d -a <slice>` commands.
+
 ## Provider and verification boundaries
 
 Install a Ghidra 12.1.x release and the 64-bit full JDK it declares, then configure REA to
@@ -1019,10 +1044,11 @@ unresolved runtime/value semantics remain visible in results.
 
 Signature inspection requests the selected architecture explicitly for identity,
 hashes, designated requirements, entitlements and runtime flags. For universal
-inputs, other slices receive signing-state probes; their detailed metadata is
-not included in the selected result, and coverage states that boundary. The
-digest-verified temporary snapshot writes to the filesystem; discovery declares
-that effect even though the selected artifact is unchanged.
+inputs, every other slice is queried too; its signing state and the fields that
+differ from the selected slice's are reported in limitations, as described
+under "Native call observation". The digest-verified temporary
+snapshot writes to the filesystem; discovery declares that effect even though
+the selected artifact is unchanged.
 
 ## Interface Builder hierarchy coverage
 
