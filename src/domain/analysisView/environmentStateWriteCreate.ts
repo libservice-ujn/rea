@@ -15,6 +15,14 @@ import {
 } from "./environmentStateRules.js";
 import { createdFields } from "./environmentStateWriteApply.js";
 import {
+  envelopeMember,
+  envelopeOf,
+  isOpaqueToken,
+  restampedFields,
+  sameQuery,
+  variedMembers,
+} from "./environmentStateWriteStamps.js";
+import {
   recordedPathValues,
   respondedIds,
   sameLinkedSource,
@@ -22,11 +30,13 @@ import {
 import {
   collectionTarget,
   entityTarget,
+  succeeded,
 } from "./environmentStateWriteChecks.js";
 import {
   built,
   callOf,
   fail,
+  itemReads,
   refuse,
   requestObject,
   retainFixed,
@@ -42,6 +52,7 @@ import {
   explainCreate,
   insertCandidates,
   insertIndex,
+  randomIdentities,
   nextInteger,
   responseShapeOf,
 } from "./environmentStateWriteExplain.js";
@@ -138,6 +149,14 @@ const buildCreate = (
   const type = draft.plan.target!;
   const idField = context.idField(type);
   const members = fieldsOf(context.state.members(type, evidence.collection));
+  // Only calls serving would take, successful and with the exemplar's query, show that a member may vary.
+  const calls = new Set(step.tool.record_ordinals);
+  const taken = context.records.filter(
+    (record) =>
+      calls.has(record.ordinal) &&
+      succeeded(record) &&
+      sameQuery(record.query, step.record.query),
+  );
   const explained = explainCreate({
     entity: evidence.observed.object,
     call: evidence.call,
@@ -145,6 +164,13 @@ const buildCreate = (
     startMs: startOf(context, step),
     collection: members,
     type: fieldsOf(context.state.ofType(type)),
+    named: (id) => context.state.named(id),
+    varied: variedMembers(
+      taken.map(({ ordinal }) => {
+        const body = context.io.requestBody(ordinal);
+        return envelopeOf(body)?.object ?? body;
+      }),
+    ),
   });
   const clocks = explained.rules.flatMap((rule) =>
     rule.rule === "clock" ? [rule.field] : [],
@@ -155,9 +181,22 @@ const buildCreate = (
       ["string", "number"].includes(typeof member[field]),
     ),
   );
-  draft.candidates = insertCandidates(members, [
-    ...new Set([idField, ...clocks, ...scalars]),
-  ]);
+  const generated = explained.rules.some(
+    (rule) =>
+      rule.rule === "identity" &&
+      rule.field === idField &&
+      rule.generator !== "sequence",
+  );
+  draft.candidates = insertCandidates(
+    members,
+    [...new Set([idField, ...clocks, ...scalars])],
+    {
+      ...(generated && randomIdentities(members, idField, clocks)
+        ? { random: idField }
+        : {}),
+      created: evidence.observed.object,
+    },
+  );
   retainFixed(context, explained.body.fixed);
   Object.assign(draft.plan, {
     exemplar_ordinal: step.record.ordinal,
@@ -173,7 +212,10 @@ const buildCreate = (
         { idField, id: evidence.observed.id },
       ),
     ),
-    body: explained.body,
+    body: {
+      ...explained.body,
+      ...envelopeMember(context.io.requestBody(step.record.ordinal)),
+    },
     rules: explained.rules,
     collection:
       explained.tied || draft.linked !== undefined ? evidence.collection : null,
@@ -227,7 +269,7 @@ const followsSequences = (
     );
   });
 
-/** Whether a later call's generated values take the forms serving generates them in: clocks in the learned format, unique values and UUID identities as UUIDs, and sequences in order. */
+/** Whether a later call's generated values take the forms serving generates them in: clocks in the learned format, unique values as the exemplar's kind of token, UUID identities as UUIDs, and sequences in order. */
 const followsGenerated = (
   context: EffectContext,
   draft: WriteDraft,
@@ -239,9 +281,16 @@ const followsGenerated = (
       return (
         JSON.stringify(readClock(value)?.format) === JSON.stringify(rule.format)
       );
+    if (rule.rule === "nested-clock")
+      return rule.members.every(
+        (member) =>
+          isObject(value ?? null) &&
+          JSON.stringify(readClock((value as JsonObject)[member])?.format) ===
+            JSON.stringify(rule.format),
+      );
     if (rule.rule === "unique")
       return (
-        isUuid(value) &&
+        (isUuid(value) || isOpaqueToken(value, draft.observed?.[rule.field])) &&
         !context.state
           .ofType(created.type)
           .some((held) => held.fields[rule.field] === value)
@@ -375,7 +424,7 @@ export const applyCreate = (
       (draft.linked !== undefined && !fromLinkedSource(context, draft, step)))
   )
     return UNKNOWN;
-  const body = requestObject(context, step.record);
+  const body = requestObject(context, step, draft);
   const observed = createdObservation(context, step, {
     type,
     collection,
@@ -439,7 +488,14 @@ export const applyCreate = (
     return recorded();
   }
   takeSequences(draft, { collection, fields: fields.value });
-  const inserted = insertCreated(context, draft, entity(fields.value, id));
+  // The call's own values follow the forms serving generates; the state holds a nested clock as the read-back restamped it, as an update's.
+  const stored = restampedFields(
+    searchFrom(context, step),
+    itemReads(context, { type, idField, collection, id }),
+    fields.value,
+    draft.plan.rules,
+  );
+  const inserted = insertCreated(context, draft, entity(stored, id));
   return {
     kind: "applied",
     targets: [inserted, collectionTarget(type, collection)],

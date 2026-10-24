@@ -46,6 +46,7 @@ import {
   type ObservedEntity,
   type StateObservation,
 } from "./environmentStateMerge.js";
+import { orderByWholeLines } from "./environmentStateInitialOrder.js";
 import { rewriteCuts, type RewriteSpan } from "./environmentStateRewrites.js";
 import {
   checkItemPlan,
@@ -70,6 +71,13 @@ import {
   withoutVariants,
 } from "./environmentStateVariants.js";
 import { stateWritesOf } from "./environmentStateQueryCalls.js";
+import {
+  declaredMembers,
+  envelopeMembers,
+  mintedFor,
+  perResponseMembers,
+  type MintedMembers,
+} from "./environmentStateResponseMembers.js";
 
 class StateBudgetExhausted extends Error {}
 
@@ -123,6 +131,7 @@ export class EnvironmentStateExtraction {
   /** The recordings either side of each such change, and per type the write its initial reads end at. */
   #spans: RewriteSpan[] = [];
   #cuts: ReadonlyMap<string, StateRecordFacts> = new Map();
+  #minted: MintedMembers | undefined;
   readonly #merged = new Map<string, StateEntity>();
   /** Merged entities by type and collection, built once on first use after merging. */
   #collections: Map<string, StateEntity[]> | undefined;
@@ -210,6 +219,10 @@ export class EnvironmentStateExtraction {
       this.#planList(candidate);
     for (const plan of this.#plans) this.#observePlan(plan);
     this.#dropVariants();
+    orderByWholeLines(
+      this.#entities.values(),
+      (ordinal) => this.#byOrdinal.get(ordinal)?.query,
+    );
     this.#classifyChanges();
     this.#merge();
     return candidates;
@@ -738,7 +751,15 @@ export class EnvironmentStateExtraction {
   }
 
   #gateContext(): StateGateContext {
+    this.#minted ??= perResponseMembers({
+      records: this.#records,
+      withBody: (ordinal, use) => this.#withBody(ordinal, use),
+      writeWithin: this.#writeWithin,
+      retain: (bytes) => this.#retain(bytes),
+      checkpoint: () => this.#budget.checkpoint(),
+    });
     return {
+      minted: this.#minted,
       withBody: (ordinal, use) => this.#withBody(ordinal, use),
       retain: (bytes) => this.#retain(bytes),
       entity: (type, collection, id) =>
@@ -824,10 +845,14 @@ export class EnvironmentStateExtraction {
         value,
         record_ordinal: record.ordinal,
       });
+      const minted = mintedFor(this.#minted ?? new Map(), [record], false);
       this.#views.set(tool.name, {
         tool: tool.name,
         shape: "document",
         checked_record_ordinals: [record.ordinal],
+        ...declaredMembers(envelopeMembers(value, minted), (bytes) =>
+          this.#retain(bytes),
+        ),
       });
     }
     return documents.sort((left, right) => compare(left.tool, right.tool));
